@@ -5,15 +5,17 @@
 #include <string>
 #include <vector>
 
+#include "states.h"
+#include "trajectory.h"
 // #include "helpers.h"
 #include "json.hpp"
+
+#define MPH_TO_MS 2.239
 using nlohmann::json;
 
 using std::map;
 using std::string;
 using std::vector;
-
-enum State { R, LK, PLCL, LCL, PLCR, LCR };
 
 class Vehicle {
  public:
@@ -26,13 +28,21 @@ class Vehicle {
   void SetPrevPath(nlohmann::basic_json<> previous_path_x,
                    nlohmann::basic_json<> previous_path_y, double end_path_s,
                    double end_path_d);
+  void SetSensorFusion(nlohmann::basic_json<> sensor_fusion);
+  void SetChosenTrajectory(Trajectory &trajectory);
   int CalculateLaneIndex(double d);
+  vector<vector<double>> PredictSensorFusion(double pred_dist);
+  vector<State> GetSuccessorStates();
+  Trajectory GenerateTrajectory(double target_speed, double target_lane,
+                                double target_traj_len, bool use_prev_path,
+                                vector<double> &map_waypoints_s,
+                                vector<double> &map_waypoints_x,
+                                vector<double> &map_waypoints_y);
 
-  vector<State> SuccessorStates();
-  vector<vector<double>> GenerateTrajectory(
-      double target_speed, double target_lane, double target_traj_len,
-      bool use_prev_path, vector<double> &map_waypoints_s,
-      vector<double> &map_waypoints_x, vector<double> &map_waypoints_y);
+  Trajectory GenerateTrajectoryKL(double target_traj_len,
+                                  vector<double> &map_waypoints_s,
+                                  vector<double> &map_waypoints_x,
+                                  vector<double> &map_waypoints_y);
 
  private:
   double x_{0};
@@ -42,7 +52,7 @@ class Vehicle {
   double yaw_{0};
   double speed_{0};
   double lane_{0};
-
+  nlohmann::basic_json<> sensor_fusion_{};
   nlohmann::basic_json<> previous_path_x_{};
   nlohmann::basic_json<> previous_path_y_{};
   double end_path_s_{0};
@@ -53,11 +63,13 @@ class Vehicle {
 
   double target_speed_{0};
   double target_lane_{0};
+  double target_trajectory_len{30};
   bool keep_trajectory_{false};
   // trajectory ?
 
   // Limits and constants
-  double speed_limit_{50};
+  double safe_s_dist{20};
+  double speed_limit_mph_{49.5};
   double acc_limit_{10};
   int num_lanes_{3};
   double time_step_{0.02};
