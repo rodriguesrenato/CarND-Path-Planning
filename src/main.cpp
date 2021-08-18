@@ -1,8 +1,10 @@
 #include <uWS/uWS.h>
 
+#include <algorithm>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -109,27 +111,14 @@ int main() {
           // j[1] is the data JSON object
 
           // Main car's localization Data
-          double car_x = j[1]["x"];
-          double car_y = j[1]["y"];
-          double car_s = j[1]["s"];
-          double car_d = j[1]["d"];
-          double car_yaw = j[1]["yaw"];
-          double car_speed = j[1]["speed"];
-
-          // Previous path data given to the Planner
-          auto previous_path_x = j[1]["previous_path_x"];
-          auto previous_path_y = j[1]["previous_path_y"];
-          // Previous path's end s and d values
-          double end_path_s = j[1]["end_path_s"];
-          double end_path_d = j[1]["end_path_d"];
-          // Sensor Fusion Data, a list of all other cars on the same side
-          //   of the road.
-          auto sensor_fusion = j[1]["sensor_fusion"];
-
           ego_car.SetLocalizationData(j[1]["x"], j[1]["y"], j[1]["s"],
                                       j[1]["d"], j[1]["yaw"], j[1]["speed"]);
+          // // Previous path data given to the Planner and path's end s and d
+          // values
           ego_car.SetPrevPath(j[1]["previous_path_x"], j[1]["previous_path_y"],
                               j[1]["end_path_s"], j[1]["end_path_d"]);
+          // Sensor Fusion Data, a list of all other cars on the same side of
+          // the road.
           ego_car.SetSensorFusion(j[1]["sensor_fusion"]);
 
           vector<State> possible_next_states = ego_car.GetSuccessorStates();
@@ -137,109 +126,30 @@ int main() {
           vector<Trajectory> possible_ego_trajectories{};
 
           for (int i = 0; i < possible_next_states.size(); i++) {
-            if (possible_next_states[i] = State::KL) {
-              Trajectory kl_trajectory = ego_car.GenerateTrajectoryKL(
-                  30.0, map_waypoints_s, map_waypoints_x, map_waypoints_y);
-              possible_ego_trajectories.push_back(kl_trajectory);
+            Trajectory trajectory = ego_car.GenerateTrajectory(
+                possible_next_states[i], map_waypoints_s, map_waypoints_x,
+                map_waypoints_y);
+            if (trajectory.x.size() > 0) {
+              ego_car.CalculateCost(trajectory);
+              possible_ego_trajectories.push_back(trajectory);
             }
           }
           Trajectory ego_trajectory;
-
+          // Sort min cost
           if (possible_ego_trajectories.size() > 0) {
+            std::sort(
+                possible_ego_trajectories.begin(),
+                possible_ego_trajectories.end(),
+                [](Trajectory a, Trajectory b) { return a.cost < b.cost; });
+                vector<string> state_str{"R", "KL", "PLCL", "LCL", "PLCR", "LCR"};
+            for (int i = 0; i < possible_ego_trajectories.size(); i++) {
+              std::cout << state_str[possible_ego_trajectories[i].state] << "[" << possible_ego_trajectories[i].cost << "] ";
+            }
             ego_trajectory = possible_ego_trajectories[0];
             ego_car.SetChosenTrajectory(ego_trajectory);
           }
+          ego_car.PrintStatistics();
 
-          // // Calculate the size of the last path that the car was following
-          // int prev_size = previous_path_x.size();
-
-          // // Define the actual x and y points we will use for the planner
-          // vector<double> next_x_vals;
-          // vector<double> next_y_vals;
-          // auto a = next_x_vals;
-
-          // // sensor_fusion =  [ id, x, y, vx, vy, s, d]: The vx, vy values
-          // can
-          // // be useful for predicting where the cars will be in the future.
-          // For
-          // // instance, if you were to assume that the tracked car kept moving
-          // // along the road, then its future predicted Frenet s value will be
-          // // its current s value plus its (transformed) total velocity (m/s)
-          // // multiplied by the time elapsed into the future (s).
-
-          // // Finite state machine
-          // if (car_state == State::R) {
-          //   vector<double> car_ahead{};
-          //   for (int i = 0; i < sensor_fusion.size(); i++) {
-          //     // Car is in my lane?
-          //     float d = sensor_fusion[i][6];
-          //     if (d < (2 + 4 * lane + 2) && d > (2 + 4 * lane - 2)) {
-          //       double vx = sensor_fusion[i][3];
-          //       double vy = sensor_fusion[i][4];
-          //       double check_speed = sqrt(vx * vx + vy * vy);
-          //       double check_car_s = sensor_fusion[i][5];
-
-          //       // Check if there is a car ahead in the same lane
-          //       if (check_car_s > end_path_s) {
-          //         car_ahead.push_back(check_speed);
-          //         car_ahead.push_back(check_car_s);
-          //         break;
-          //       }
-          //     }
-          //   }
-
-          //   // In case there isn't any car ahead or there is a distance
-          //   greater
-          //   // than the MIN_S_DIST_AHEAD, then change to Lane Keep State
-          //   if (car_ahead.empty()) {
-          //     car_state = State::KL;
-          //     // return;
-          //   } else {
-          //     if (car_ahead[1] > 30.0) {
-          //       car_state = State::KL;
-          //     }
-          //   }
-          // } else {
-          //   if (car_state == State::KL) {
-          //     // Find ref_v to use
-          //     ref_vel = 50 / 2.24;
-          //     ref_dist_ahead = 0.0;
-          //     for (int i = 0; i < sensor_fusion.size(); i++) {
-          //       // Car is in my lane?
-          //       float d = sensor_fusion[i][6];
-          //       if (d < (2 + 4 * lane + 2) && d > (2 + 4 * lane - 2)) {
-          //         double vx = sensor_fusion[i][3];
-          //         double vy = sensor_fusion[i][4];
-          //         double check_speed = sqrt(vx * vx + vy * vy);
-          //         double check_car_s = sensor_fusion[i][5];
-
-          //         // Project s value outwards in time
-          //         check_car_s += ((double)prev_size * 0.02 * check_speed);
-
-          //         // Check s values greater than mine and s gap
-          //         if ((check_car_s > end_path_s) &&
-          //             ((check_car_s - end_path_s) < SAFE_S_DIST_AHEAD)) {
-          //           // too_close = true;
-          //           // TODO: set flag to change lanes, lower the speed
-          //           ref_vel = check_speed;
-          //           ref_dist_ahead = sensor_fusion[i][5];
-          //           // if (lane > 0) {
-          //           //   lane = 0;
-          //           // }
-          //         }
-          //       }
-          //     }
-          //   }
-          //   std::cout << "ego_s= " << j[1]["s"];
-          //   for (int i = 0; i < sensor_fusion.size(); i++) {
-          //     std::cout << " | " << (int)sensor_fusion[i][5] << "/"<<
-          //     ((int)sensor_fusion[i][6])/4;
-          //   }
-          // ego_trajectory = ego_car.GenerateTrajectory(
-          //     ref_vel, lane, 30, true, map_waypoints_s, map_waypoints_x,
-          //     map_waypoints_y);
-          // ego_car.SetChosenTrajectory(ego_trajectory);
-          // }
           json msgJson;
 
           msgJson["next_x"] = ego_trajectory.x;

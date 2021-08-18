@@ -11,6 +11,7 @@
 #include "json.hpp"
 
 #define MPH_TO_MS 2.239
+
 using nlohmann::json;
 
 using std::map;
@@ -20,7 +21,7 @@ using std::vector;
 class Vehicle {
  public:
   Vehicle(){};
-  Vehicle(double speed_limit, double acc_limit, int num_lanes, double time_step,
+  Vehicle(double road_speed_limit, double acc_limit, int num_lanes, double time_step,
           double lane_width);
   void SetState(State state);
   void SetLocalizationData(double x, double y, double s, double d, double yaw,
@@ -31,11 +32,9 @@ class Vehicle {
   void SetSensorFusion(nlohmann::basic_json<> sensor_fusion);
   void SetChosenTrajectory(Trajectory &trajectory);
   int CalculateLaneIndex(double d);
-  vector<vector<double>> PredictSensorFusion(double pred_dist);
+  vector<vector<double>> PredictSensorFusion(float pred_dist);
   vector<State> GetSuccessorStates();
-  Trajectory GenerateTrajectory(double target_speed, double target_lane,
-                                double target_traj_len, bool use_prev_path,
-                                vector<double> &map_waypoints_s,
+  Trajectory GenerateTrajectory(State state, vector<double> &map_waypoints_s,
                                 vector<double> &map_waypoints_x,
                                 vector<double> &map_waypoints_y);
 
@@ -43,6 +42,22 @@ class Vehicle {
                                   vector<double> &map_waypoints_s,
                                   vector<double> &map_waypoints_x,
                                   vector<double> &map_waypoints_y);
+  Trajectory GenerateTrajectoryLC(State state, double target_traj_len,
+                                  vector<double> &map_waypoints_s,
+                                  vector<double> &map_waypoints_x,
+                                  vector<double> &map_waypoints_y);
+  Trajectory GenerateTrajectoryPLC(State state, double target_traj_len,
+                                   vector<double> &map_waypoints_s,
+                                   vector<double> &map_waypoints_x,
+                                   vector<double> &map_waypoints_y);
+
+  void CalculateCost(Trajectory& trajectory);
+  float SpeedCost(Trajectory &trajectory);
+  float LaneChangeCost(Trajectory &trajectory);
+  float AvoidColisionCost(Trajectory &trajectory);
+  float BufferDistanceCost(Trajectory &trajectory);
+
+  void PrintStatistics();
 
  private:
   double x_{0};
@@ -60,20 +75,29 @@ class Vehicle {
 
   State state_{State::R};
   State state_prev_{State::R};
-
+  
+  double trajectory_final_speed_{0};
   double target_speed_{0};
   double target_lane_{0};
-  double target_trajectory_len{30};
+  double target_cost_{0};
+  double target_trajectory_len_{30};
   bool keep_trajectory_{false};
+
+  vector<vector<double>> predictions_{};
+  float prediction_dist_prev_{0.0};
   // trajectory ?
 
   // Limits and constants
-  double safe_s_dist{20};
+  double safe_s_dist{15.0};
   double speed_limit_mph_{49.5};
+  double speed_buffer_mph_{0.5};
   double acc_limit_{10};
   int num_lanes_{3};
   double time_step_{0.02};
   double lane_width_{4};
+  int trajectory_buffer_size_{50};
+  double vehicle_length_{5.0};
+
 
   // Generate predictions for all other vehicles
   // choose_next State(predictions)
