@@ -136,19 +136,20 @@ int main() {
           }
           Trajectory ego_trajectory;
           // Sort min cost
+          float check_cost = 0;
           if (possible_ego_trajectories.size() > 0) {
             std::sort(
                 possible_ego_trajectories.begin(),
                 possible_ego_trajectories.end(),
                 [](Trajectory a, Trajectory b) { return a.cost < b.cost; });
-                vector<string> state_str{"R", "KL", "PLCL", "LCL", "PLCR", "LCR"};
-            for (int i = 0; i < possible_ego_trajectories.size(); i++) {
-              std::cout << state_str[possible_ego_trajectories[i].state] << "[" << possible_ego_trajectories[i].cost << "] ";
-            }
             ego_trajectory = possible_ego_trajectories[0];
             ego_car.SetChosenTrajectory(ego_trajectory);
           }
-          ego_car.PrintStatistics();
+          // std::cout << std::endl;
+          ego_car.PrintStatistics(possible_ego_trajectories);
+          // if (check_cost == 0 && possible_ego_trajectories.size() >= 2) {
+          //   std::cout << "###";
+          // }
 
           json msgJson;
 

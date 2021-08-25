@@ -63,9 +63,9 @@ class Vehicle {
                                     vector<double> &map_waypoints_x,
                                     vector<double> &map_waypoints_y);
 
-  Trajectory BuildTrajectory(State state, int target_lane, double target_speed,
-                             int traj_size, double traj_s_len,
-                             vector<double> &map_waypoints_s,
+  Trajectory BuildTrajectory(State state, double speed, int target_lane,
+                             double target_speed, int traj_size,
+                             double traj_s_len, vector<double> &map_waypoints_s,
                              vector<double> &map_waypoints_x,
                              vector<double> &map_waypoints_y);
   void CalculateCost(Trajectory &trajectory);
@@ -74,15 +74,16 @@ class Vehicle {
   float AvoidColisionCost(Trajectory &trajectory);
   float BufferDistanceCost(Trajectory &trajectory);
 
-  bool CheckColision();
+  bool CheckColision(double init_s, double final_s, int init_lane,
+                     int final_lane, int buffer_size);
   double CalculateLaneSpeed(int lane);
 
-  vector<vector<double>> PredictSensorFusion();
+  vector<vector<double>> PredictSensorFusion(int buffer_size);
   vector<double> PredictVehicle();
   vector<double> GetVehicleAhead(int lane);
   vector<double> GetVehicleBehind(int lane);
 
-  void PrintStatistics();
+  void PrintStatistics(vector<Trajectory> t);
 
  private:
   double x_{0};
@@ -109,9 +110,10 @@ class Vehicle {
   double target_trajectory_len_{30};
   bool keep_trajectory_{false};
 
-  vector<vector<double>> predictions_{};
+  map<int, vector<vector<double>>> predictions_{};
+  vector<vector<double>> predictions_2{};
   vector<int> lane_speed_predictions_{};
-  vector<int> lane_speed_{};
+  map<int, double> lane_speed_{};
 
   float prediction_dist_prev_{0.0};
   // trajectory ?
@@ -128,6 +130,7 @@ class Vehicle {
   double lane_width_{4};
   int trajectory_buffer_size_{50};
   double vehicle_length_{5.0};
+  double vehicle_width_{3.0};
 
   // Generate predictions for all other vehicles
   // choose_next State(predictions)

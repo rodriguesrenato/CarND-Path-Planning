@@ -1,6 +1,6 @@
 #ifndef STATES_H
 #define STATES_H
 
-enum State { R, KL, PLCL, LCL, PLCR, LCR };
+enum State { R, KL, LCL, PLCL, LCR, PLCR };
 
 #endif
