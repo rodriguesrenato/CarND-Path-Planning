@@ -63,8 +63,8 @@ class Vehicle {
                                     vector<double> &map_waypoints_x,
                                     vector<double> &map_waypoints_y);
 
-  Trajectory BuildTrajectory(State state, double speed, int target_lane,
-                             double target_speed, int traj_size,
+  Trajectory BuildTrajectory(State state, int target_lane,
+                              int traj_size,
                              double traj_s_len, vector<double> &map_waypoints_s,
                              vector<double> &map_waypoints_x,
                              vector<double> &map_waypoints_y);
@@ -77,6 +77,7 @@ class Vehicle {
   bool CheckColision(double init_s, double final_s, int init_lane,
                      int final_lane, int buffer_size);
   double CalculateLaneSpeed(int lane);
+  vector<int> LanesToCheckSpeed(double d);
 
   vector<vector<double>> PredictSensorFusion(int buffer_size);
   vector<double> PredictVehicle();
@@ -105,7 +106,8 @@ class Vehicle {
   double trajectory_final_speed_{0};
   double trajectory_final_speed_prev_{0};
   double target_speed_{0};
-  double target_lane_{0};
+  int projected_lane_{0};
+  int target_lane_{0};
   double target_cost_{0};
   double target_trajectory_len_{30};
   bool keep_trajectory_{false};
@@ -114,20 +116,19 @@ class Vehicle {
   vector<vector<double>> predictions_2{};
   vector<int> lane_speed_predictions_{};
   map<int, double> lane_speed_{};
-
   float prediction_dist_prev_{0.0};
   // trajectory ?
 
   // Limits and constants
   double safe_s_dist{15.0};
-  double safe_s_dist_ahead_{15.0};
-  double safe_s_dist_behind_{5.0};
+  double safe_s_dist_ahead_{10.0};
+  double safe_s_dist_behind_{2.0};
   double speed_limit_mph_{49.5};
   double speed_buffer_mph_{0.5};
   double acc_limit_{10};
   int num_lanes_{3};
   double time_step_{0.02};
-  double lane_width_{4};
+  double lane_width_{4.0};
   int trajectory_buffer_size_{50};
   double vehicle_length_{5.0};
   double vehicle_width_{3.0};

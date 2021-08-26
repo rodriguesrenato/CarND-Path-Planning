@@ -2,6 +2,7 @@
 #include "vehicle.h"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <iostream>
 #include <iterator>
@@ -68,10 +69,29 @@ int Vehicle::CalculateLaneIndex(double d) {
     return d / lane_width_ - 1;
   }
 }
+
+vector<int> Vehicle::LanesToCheckSpeed(double d) {
+  vector<int> lanes;
+  if (d >= 0) {
+    lanes.push_back(d / lane_width_);
+  } else {
+    lanes.push_back(d / lane_width_ - 1);
+  }
+  float lane_pos = fmod(d, lane_width_);
+  if (lane_pos < (vehicle_width_ / 2)) {
+    lanes.push_back(lanes[0] - 1);
+  }
+  if (lane_pos > lane_width_ - (vehicle_width_ / 2)) {
+    lanes.push_back(lanes[0] + 1);
+  }
+  return lanes;
+}
+
 void Vehicle::SetChosenTrajectory(Trajectory &trajectory) {
-  target_speed_ = trajectory.target_speed;
+  target_speed_ = trajectory.target_speed;  // TODO: Debug
   trajectory_final_speed_ = trajectory.final_speed;
-  target_lane_ = trajectory.target_lane;
+  target_lane_ = trajectory.target_lane;  // TODO: Debug
+  projected_lane_ = trajectory.projected_lane;
   target_cost_ = trajectory.cost;
   SetState(trajectory.state);
 }
@@ -136,26 +156,6 @@ vector<vector<double>> Vehicle::PredictSensorFusion(int buffer_size) {
   return predictions_[buffer_size];
 }
 
-// pred_sensor_fusion =  [ id, s,final_s, d, final_speed]
-// vector<vector<double>> Vehicle::PredictSensorFusion(int buffer_size) {
-//   if (predictions_2.empty()) {
-//     for (int i = 0; i < sensor_fusion_.size(); i++) {
-//       double vx = sensor_fusion_[i][3];
-//       double vy = sensor_fusion_[i][4];
-//       double check_speed = sqrt(vx * vx + vy * vy);
-//       double check_car_s = sensor_fusion_[i][5];
-//       // Project s value outwards in time
-//       check_car_s +=
-//           ((double)trajectory_buffer_size_ * time_step_ * check_speed);
-
-//       predictions_2.push_back({sensor_fusion_[i][0], sensor_fusion_[i][5],
-//                               check_car_s, sensor_fusion_[i][6],
-//                               check_speed});
-//     }
-//   }
-//   return predictions_2;
-// }
-
 Trajectory Vehicle::GenerateTrajectory(State state,
                                        vector<double> &map_waypoints_s,
                                        vector<double> &map_waypoints_x,
@@ -180,125 +180,45 @@ Trajectory Vehicle::GenerateTrajectoryKL2(double target_traj_len,
                                           vector<double> &map_waypoints_s,
                                           vector<double> &map_waypoints_x,
                                           vector<double> &map_waypoints_y) {
-  double speed = speed_limit_mph_ / MPH_TO_MS;
-  auto vehicle_ahead = GetVehicleAhead(lane_);
-  // if(!vehicle_ahead.empty()){
-  //   speed = vehicle_ahead[0];
-  // }
-  auto vehicle_behind = GetVehicleBehind(lane_);
-  if (!vehicle_ahead.empty()) {
-    if (!vehicle_behind.empty()) {
-      speed = vehicle_ahead[0];
-    } else {
-      speed = vehicle_ahead[0] *
-              ((vehicle_ahead[1] / (safe_s_dist_ahead_)) * 0.1 + 0.9);
-    }
-  }
-  return BuildTrajectory(State::KL, speed, lane_, speed,
-                         trajectory_buffer_size_, target_trajectory_len_,
-                         map_waypoints_s, map_waypoints_x, map_waypoints_y);
+  return BuildTrajectory(State::KL, lane_, trajectory_buffer_size_,
+                         target_traj_len, map_waypoints_s, map_waypoints_x,
+                         map_waypoints_y);
 }
 
 Trajectory Vehicle::GenerateTrajectoryPLC2(State state, double target_traj_len,
                                            vector<double> &map_waypoints_s,
                                            vector<double> &map_waypoints_x,
                                            vector<double> &map_waypoints_y) {
-  double target_speed = speed_limit_mph_ / MPH_TO_MS;
-  int next_lane =
+  int target_lane =
       lane_ + (state == State::PLCR) * 1 + (state == State::PLCL) * -1;
 
-  auto vehicle_ahead = GetVehicleAhead(lane_);
-  auto vehicle_behind = GetVehicleBehind(lane_);
-  auto vehicle_next_lane_ahead = GetVehicleAhead(next_lane);
-  auto vehicle_next_lane_behind = GetVehicleBehind(next_lane);
-  double next_lane_target_speed = speed_limit_mph_ / MPH_TO_MS;
-
-  if (!vehicle_ahead.empty()) {
-    if (!vehicle_behind.empty()) {
-      target_speed = vehicle_ahead[0];
-    } else {
-      target_speed = vehicle_ahead[0] *
-                     ((vehicle_ahead[1] / (safe_s_dist_ahead_)) * 0.1 + 0.9);
-    }
-  }
-
-  if (!vehicle_next_lane_ahead.empty()) {
-    if (!vehicle_next_lane_behind.empty()) {
-      next_lane_target_speed = vehicle_next_lane_ahead[0];
-    } else {
-      next_lane_target_speed =
-          vehicle_next_lane_ahead[0] *
-          ((vehicle_next_lane_ahead[1] / (safe_s_dist_ahead_)) * 0.1 + 0.9);
-    }
-  }
-  if (vehicle_behind.empty()) {
-    if (next_lane_target_speed < target_speed) {
-      target_speed = next_lane_target_speed;
-    }
-  }
-
-  return BuildTrajectory(state, target_speed, next_lane, next_lane_target_speed,
-                         trajectory_buffer_size_, target_trajectory_len_,
-                         map_waypoints_s, map_waypoints_x, map_waypoints_y);
+  return BuildTrajectory(state, target_lane, trajectory_buffer_size_,
+                         target_traj_len, map_waypoints_s, map_waypoints_x,
+                         map_waypoints_y);
 }
 
 Trajectory Vehicle::GenerateTrajectoryLC2(State state, double target_traj_len,
                                           vector<double> &map_waypoints_s,
                                           vector<double> &map_waypoints_x,
                                           vector<double> &map_waypoints_y) {
-  double target_speed = speed_limit_mph_ / MPH_TO_MS;
-  int next_lane =
+  int target_lane =
       lane_ + (state == State::LCR) * 1 + (state == State::LCL) * -1;
-
-  if (CheckColision(s_, end_path_s_, lane_, next_lane,
-                    previous_path_x_.size())) {
-    std::cout << "LCCol! ";
-    return Trajectory();
-  }
-
-  auto vehicle_ahead = GetVehicleAhead(lane_);
-  auto vehicle_behind = GetVehicleBehind(lane_);
-  if (!vehicle_ahead.empty()) {
-    if (!vehicle_behind.empty()) {
-      target_speed = vehicle_ahead[0];
-    } else {
-      target_speed = vehicle_ahead[0] *
-                     ((vehicle_ahead[1] / (safe_s_dist_ahead_)) * 0.1 + 0.9);
-    }
-  }
-
-  auto vehicle_next_lane_ahead = GetVehicleAhead(next_lane);
-  auto vehicle_next_lane_behind = GetVehicleBehind(next_lane);
-  double next_lane_target_speed = speed_limit_mph_ / MPH_TO_MS;
-
-  if (!vehicle_next_lane_ahead.empty()) {
-    if (!vehicle_next_lane_behind.empty()) {
-      next_lane_target_speed = vehicle_next_lane_ahead[0];
-    } else {
-      next_lane_target_speed =
-          vehicle_next_lane_ahead[0] *
-          ((vehicle_next_lane_ahead[1] / (safe_s_dist_ahead_)) * 0.1 + 0.9);
-    }
-  }
-  // if (next_lane_target_speed > target_speed) {
-  //   next_lane_target_speed = target_speed;
-  // }
-  // TODO: Check if slowest speed between lanes is needed
-  return BuildTrajectory(state, target_speed, next_lane, next_lane_target_speed,
-                         trajectory_buffer_size_, target_trajectory_len_,
-                         map_waypoints_s, map_waypoints_x, map_waypoints_y);
+  return BuildTrajectory(state, target_lane, trajectory_buffer_size_,
+                         target_traj_len, map_waypoints_s, map_waypoints_x,
+                         map_waypoints_y);
 }
 
 // Returns a vector [final_speed,final_distance,final_s ] of the closest vehicle
 // ahead
 vector<double> Vehicle::GetVehicleAhead(int lane) {
-  double distance_ahead = safe_s_dist_ahead_;
+  double distance_ahead = safe_s_dist_ahead_ + vehicle_length_;
   // preds = [ id, s,final_s, d, final_speed]
   auto preds = PredictSensorFusion(previous_path_x_.size());
   vector<double> vehicle_ahead{};
   for (int i = 0; i < preds.size(); i++) {
     if (lane == CalculateLaneIndex(preds[i][3])) {
-      if (preds[i][1] > s_ && (preds[i][2] - end_path_s_) < distance_ahead) {
+      if (preds[i][1] > s_ && preds[i][2] > end_path_s_ &&
+          (preds[i][2] - end_path_s_) < distance_ahead) {
         distance_ahead = preds[i][2] - end_path_s_;
         vehicle_ahead = {preds[i][4], distance_ahead, preds[i][2]};
       }
@@ -312,13 +232,14 @@ vector<double> Vehicle::GetVehicleAhead(int lane) {
 // Returns a vector [final_speed,final_distance,final_s ] of the closest vehicle
 // behind
 vector<double> Vehicle::GetVehicleBehind(int lane) {
-  double distance_behind = safe_s_dist_behind_;
+  double distance_behind = safe_s_dist_behind_ + vehicle_length_;
   // preds = [ id, s,final_s, d, final_speed]
   auto preds = PredictSensorFusion(previous_path_x_.size());
   vector<double> vehicle_behind{};
   for (int i = 0; i < preds.size(); i++) {
     if (lane == CalculateLaneIndex(preds[i][3])) {
-      if (preds[i][1] < s_ && (end_path_s_ - preds[i][2]) < distance_behind) {
+      if (preds[i][1] < s_ && preds[i][2] < end_path_s_ &&
+          (end_path_s_ - preds[i][2]) < distance_behind) {
         distance_behind = end_path_s_ - preds[i][2];
         vehicle_behind = {preds[i][4], distance_behind, preds[i][2]};
       }
@@ -327,8 +248,7 @@ vector<double> Vehicle::GetVehicleBehind(int lane) {
   return vehicle_behind;
 }
 
-Trajectory Vehicle::BuildTrajectory(State state, double speed, int target_lane,
-                                    double target_speed, int traj_size,
+Trajectory Vehicle::BuildTrajectory(State state, int target_lane, int traj_size,
                                     double traj_s_len,
                                     vector<double> &map_waypoints_s,
                                     vector<double> &map_waypoints_x,
@@ -340,49 +260,62 @@ Trajectory Vehicle::BuildTrajectory(State state, double speed, int target_lane,
     return trajectory;
   }
 
-  // Set the trajectory final lane
-  double projected_d = 2.0 + 4.0 * (lane_ + (state == State::LCR) * 1 +
-                                    (state == State::LCL) * -1);
-  // if (projected_d != (2.0 + 4.0 * lane_)) {
-  //   std::cout << ">>>";
-  // }
-  double wp0_d = projected_d;
-  // +4 * 0.5 * ((state == State::LCR) * -1 + (state == State::LCL) * 1)
-  double wp1_d = projected_d;
-  double wp2_d = projected_d;
-
-  int lane = lane_;
-  if (state == State::LCL) {
-    lane -= 1;
-  } else if (state == State::LCR) {
-    lane += 1;
+  // Check for the lowest safe speed at the current lane position
+  vector<double> speeds{};
+  vector<int> lanes = LanesToCheckSpeed(d_);
+  if (std::find(lanes.begin(), lanes.end(), target_lane) != lanes.end()) {
+    lanes.push_back(target_lane);
   }
-  // wp1_d = d_ + (target_d - d_) * 0.66;
+
+  for (int i = 0; i < lanes.size(); i++) {
+    double lane_speed = speed_limit_mph_ / MPH_TO_MS;
+    auto vehicle_ahead = GetVehicleAhead(lanes[i]);
+    auto vehicle_behind = GetVehicleBehind(lanes[i]);
+
+    if (!vehicle_ahead.empty()) {
+      if (!vehicle_behind.empty()) {
+        lane_speed = vehicle_ahead[0];
+      } else {
+        double speed_adj =
+            vehicle_ahead[0] *
+            ((vehicle_ahead[1] /
+              (safe_s_dist_ahead_ + vehicle_length_)));  // *0.1 +0.9
+        lane_speed = std::min(vehicle_ahead[0], speed_adj);
+      }
+    }
+    speeds.push_back(lane_speed);
+  }
+
+  // Set the minimum speed as the build trajectory speed
+  double speed = *std::min_element(speeds.begin(), speeds.end());
+
+  // Set the trajectory final lane
+  int projected_lane =
+      lane_ + (state == State::LCR) * 1 + (state == State::LCL) * -1;
 
   int prev_path_size = previous_path_x_.size();
-
-  // Define the anchor points to create the spline
-  vector<double> ptsx;
-  vector<double> ptsy;
-
-  double ref_x = x_;
-  double ref_y = y_;
-  double ref_yaw = deg2rad(yaw_);
 
   // Check if trajectory needs to be reconstructed near the beginning due to
   // rapid change on speed or start a LC
   bool lane_change_state_check = (state != State::LCL) || (state != State::LCR);
-  // bool lane_change_state_check = (state_ == State::LCL || state !=
-  // State::LCR);
+
   if ((speed_ - speed) > 2.0 || lane_change_state_check) {
     // Use only 20% of the previous points
     if (prev_path_size > traj_size / 10) {
       prev_path_size = traj_size / 10;
     }
   }
+  // Define the anchor points to create the spline
+  vector<double> ptsx{};
+  vector<double> ptsy{};
+
+  double ref_x = x_;
+  double ref_y = y_;
+  double ref_yaw = deg2rad(yaw_);
 
   // If previous size is almost empty, use the car as starting point
   if (prev_path_size < 2) {
+    // prev_path_size = 0;
     // Use two points that make the path tangent to the car
     double prev_car_x = ref_x - cos(ref_yaw);
     double prev_car_y = ref_y - sin(ref_yaw);
@@ -392,6 +325,7 @@ Trajectory Vehicle::BuildTrajectory(State state, double speed, int target_lane,
 
     ptsy.push_back(prev_car_y);
     ptsy.push_back(ref_y);
+    std::cout << "ref_x= " << ref_x << "\tref_y= " << ref_y << std::endl;
   }
 
   // Use the previous path's end points as starting reference
@@ -413,18 +347,18 @@ Trajectory Vehicle::BuildTrajectory(State state, double speed, int target_lane,
     ptsy.push_back(ref_y);
   }
 
-  // auto ref_sd =
-  //     getFrenet(ref_x, ref_y, ref_yaw, map_waypoints_x, map_waypoints_y);
   // In frenet add evenly 30m spaced points ahead of the starting
   // reference
-  double s_proj = 30;
-
-  vector<double> next_wp0 = getXY(s_ + 30, 2 + 4 * lane, map_waypoints_s,
-                                  map_waypoints_x, map_waypoints_y);
-  vector<double> next_wp1 = getXY(s_ + 45, 2 + 4 * lane, map_waypoints_s,
-                                  map_waypoints_x, map_waypoints_y);
-  vector<double> next_wp2 = getXY(s_ + 60, 2 + 4 * lane, map_waypoints_s,
-                                  map_waypoints_x, map_waypoints_y);
+  // TODO traj_s_len*1.5
+  vector<double> next_wp0 =
+      getXY(s_ + 30, 2 + 4 * projected_lane, map_waypoints_s, map_waypoints_x,
+            map_waypoints_y);
+  vector<double> next_wp1 =
+      getXY(s_ + 45, 2 + 4 * projected_lane, map_waypoints_s, map_waypoints_x,
+            map_waypoints_y);
+  vector<double> next_wp2 =
+      getXY(s_ + 60, 2 + 4 * projected_lane, map_waypoints_s, map_waypoints_x,
+            map_waypoints_y);
 
   ptsx.push_back(next_wp0[0]);
   ptsx.push_back(next_wp1[0]);
@@ -450,7 +384,8 @@ Trajectory Vehicle::BuildTrajectory(State state, double speed, int target_lane,
   // Set x and y points to the spline
   s.set_points(ptsx, ptsy);
 
-  // Start with all of the previous path points from last time
+  // Start with all of the previous path points from last time TODO: Jogar pra
+  // cima
   for (int i = 0; i < prev_path_size; i++) {
     trajectory.x.push_back(previous_path_x_[i]);
     trajectory.y.push_back(previous_path_y_[i]);
@@ -471,16 +406,16 @@ Trajectory Vehicle::BuildTrajectory(State state, double speed, int target_lane,
   // precisar porque se cai para 5 o buffer antigo. vai ter no maixmo umas duas
   // iteracoes (2-3 pos consumidas por step), assim o daria para acelerar no
   // maximo 2*.224=.448
-  double max_acceleration = 10;
-  if (fabs(trajectory_final_speed - speed) < max_acceleration) {
-    if (trajectory_final_speed > speed) {
-      trajectory_final_speed -= .224;
-    } else {
-      if (trajectory_final_speed < speed) {
-        trajectory_final_speed += .224;
-      }
+  // double max_acceleration = 10;
+  // if (fabs(trajectory_final_speed - speed) < max_acceleration) {
+  if (trajectory_final_speed > speed) {
+    trajectory_final_speed -= .224;
+  } else {
+    if (trajectory_final_speed < speed) {
+      trajectory_final_speed += .224;
     }
   }
+  // }
 
   // Calculate how to break up spline points so that we travel at our
   // desired reference velocity
@@ -511,16 +446,18 @@ Trajectory Vehicle::BuildTrajectory(State state, double speed, int target_lane,
     trajectory.y.push_back(y_point);
   }
 
+  // Buffering to be used in next trajectory build
   trajectory.prev_speed = trajectory_final_speed_;
   trajectory.final_speed = trajectory_final_speed;
-  trajectory.lane_speed = speed;
-  trajectory.projected_lane = lane;
-  trajectory.target_speed = target_speed;
-  trajectory.target_lane = target_lane;
-
   trajectory.state = state;
   trajectory.prev_state = state_;
 
+  // Vars to calc cost
+  trajectory.target_speed = speed;
+  trajectory.target_lane = target_lane;
+  trajectory.projected_lane = projected_lane;
+
+  trajectory.lane_speed = speed;
   double final_x = trajectory.x[traj_size - 1];
   double final_y = trajectory.y[traj_size - 1];
   double final_x_prev = trajectory.x[traj_size - 2];
@@ -540,7 +477,9 @@ void Vehicle::CalculateCost(Trajectory &trajectory) {
   float cost0 = weights[0] * SpeedCost(trajectory);
   float cost1 = weights[1] * LaneChangeCost(trajectory);
   float cost2 = weights[2] * AvoidColisionCost(trajectory);
-  float cost3 = weights[3] * BufferDistanceCost(trajectory);
+  float cost3 =
+      weights[3] * BufferDistanceCost(
+                       trajectory);  // TODO: remover, adicionar OutOfBoundaries
   trajectory.cost = cost0 + cost1 + cost2 + cost3;
   trajectory.cost_debug = {cost0, cost1, cost2, cost3};
 }
@@ -548,17 +487,14 @@ void Vehicle::CalculateCost(Trajectory &trajectory) {
 float Vehicle::SpeedCost(Trajectory &trajectory) {
   float cost = 0;
   float stop_cost = 0.8;
-
-  if (trajectory.target_speed >
-          (speed_limit_mph_ + speed_buffer_mph_) / MPH_TO_MS ||
-      trajectory.target_speed < 0) {
+  double speed = trajectory.target_speed;
+  if (speed > (speed_limit_mph_ + speed_buffer_mph_) / MPH_TO_MS || speed < 0) {
     cost = 1;
-  } else if (trajectory.target_speed < speed_limit_mph_ / MPH_TO_MS) {
-    cost = stop_cost *
-           ((speed_limit_mph_ / MPH_TO_MS) - trajectory.target_speed) /
+  } else if (speed < speed_limit_mph_ / MPH_TO_MS) {
+    cost = stop_cost * ((speed_limit_mph_ / MPH_TO_MS) - speed) /
            (speed_limit_mph_ / MPH_TO_MS);
   } else {
-    cost = (trajectory.target_speed - speed_limit_mph_ / MPH_TO_MS) /
+    cost = (speed - speed_limit_mph_ / MPH_TO_MS) /
            (speed_buffer_mph_ / MPH_TO_MS);
   }
 
@@ -568,11 +504,7 @@ float Vehicle::SpeedCost(Trajectory &trajectory) {
 float Vehicle::LaneChangeCost(Trajectory &trajectory) {
   // [final_speed,final_distance,final_s ]
   float optimal_speed = speed_limit_mph_ / MPH_TO_MS;
-  // double target_lane_speed = optimal_speed;
-  // auto vehicle_ahead = GetVehicleAhead(trajectory.target_lane);
-  // if (!vehicle_ahead.empty()) {
-  //   target_lane_speed = vehicle_ahead[0];
-  // }
+
   double projected_speed = CalculateLaneSpeed(trajectory.projected_lane);
   double target_speed = CalculateLaneSpeed(trajectory.target_lane);
   float cost =
@@ -586,7 +518,8 @@ double Vehicle::CalculateLaneSpeed(int lane) {
     auto preds = PredictSensorFusion(previous_path_x_.size());
     // preds[ id, s,final_s, d, final_speed]
     for (int i = 0; i < preds.size(); i++) {
-      if (lane == CalculateLaneIndex(preds[i][3])) {
+      if (lane == CalculateLaneIndex(
+                      preds[i][3])) {  // adicionar o vehicle length? TODO
         if (preds[i][1] > s_ && preds[i][1] < s_ + target_trajectory_len_) {
           if (preds[i][4] < lane_speed) {
             lane_speed = preds[i][4];
@@ -669,13 +602,13 @@ void Vehicle::PrintStatistics(vector<Trajectory> t) {
   if (state_ != state_prev_) {
     vector<string> state_str{"R", "KL", "LCL", "PLCL", "LCR", "PLCR"};
     std::cout << std::fixed << std::setprecision(2)
-              << "State = " << state_str[state_prev_] << "->"
+              << "State: " << state_str[state_prev_] << "\t-> "
               << state_str[state_]
               // << "\tcost = " << target_cost_
               << "\tSpeed: " << speed_ << " -> " << trajectory_final_speed_
               << " | " << target_speed_ << std::fixed << std::setprecision(0)
-              << "\tLane: " << lane_ << "->" << target_lane_ << "\t"
-              << std::fixed << std::setprecision(3);
+              << "\tLane: " << lane_ << "->" << projected_lane_ << "|"
+              << target_lane_ << "\t" << std::fixed << std::setprecision(3);
     for (int i = 0; i < t.size(); i++) {
       std::cout << state_str[t[i].state] << "[";
       for (int j = 0; j < t[i].cost_debug.size(); j++) {
