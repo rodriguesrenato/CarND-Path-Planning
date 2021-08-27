@@ -57,8 +57,10 @@ int main() {
   // The max s value before wrapping around the track back to 0
   double max_s = 6945.554;
 
+  // Read the map file
   std::ifstream in_map_(map_file_.c_str(), std::ifstream::in);
 
+  // Populate the map waypoints vectors
   string line;
   while (getline(in_map_, line)) {
     std::istringstream iss(line);
@@ -79,21 +81,11 @@ int main() {
     map_waypoints_dy.push_back(d_y);
   }
 
-  // Start in lane 1;
-  int lane = 1;
-  State car_state = State::R;
+  // Instantiate the main car object
+  Vehicle main_car = Vehicle(50.0,0.5,3,0.02,4.0,30.0,10.0,2.0,50,5.0,3.0);
 
-  // Have a reference velocity to target
-  double ref_vel = 0.0;       // mph
-  double ref_vel_prev = 0.0;  // mph
-  double err_vel_prev = 0.0;
-  double err_vel_sum = 0.0;
-  double ref_dist_ahead = 0.0;  // m
-  Vehicle ego_car;
-
-  h.onMessage([&ego_car, &car_state, &err_vel_prev, &err_vel_sum, &lane,
-               &ref_vel, &ref_vel_prev, &ref_dist_ahead, &map_waypoints_x,
-               &map_waypoints_y, &map_waypoints_s, &map_waypoints_dx,
+  h.onMessage([&main_car, &map_waypoints_x, &map_waypoints_y, &map_waypoints_s,
+               &map_waypoints_dx,
                &map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data,
                                   size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
@@ -108,56 +100,66 @@ int main() {
         string event = j[0].get<string>();
 
         if (event == "telemetry") {
-          // j[1] is the data JSON object
+          // j[1] is the data JSON object received from simulator
 
-          // Main car's localization Data
-          ego_car.SetLocalizationData(j[1]["x"], j[1]["y"], j[1]["s"],
-                                      j[1]["d"], j[1]["yaw"], j[1]["speed"]);
-          // // Previous path data given to the Planner and path's end s and d
-          // values
-          ego_car.SetPrevPath(j[1]["previous_path_x"], j[1]["previous_path_y"],
-                              j[1]["end_path_s"], j[1]["end_path_d"]);
-          // Sensor Fusion Data, a list of all other cars on the same side of
-          // the road.
-          ego_car.SetSensorFusion(j[1]["sensor_fusion"]);
+          // Update the main car's localization Data
+          main_car.UpdateLocalizationData(j[1]["x"], j[1]["y"], j[1]["s"],
+                                       j[1]["d"], j[1]["yaw"], j[1]["speed"]);
 
-          vector<State> possible_next_states = ego_car.GetSuccessorStates();
+          // Update the previous path data and the end s and d values of it
+          main_car.UpdatePreviousPath(j[1]["previous_path_x"], j[1]["previous_path_y"],
+                               j[1]["end_path_s"], j[1]["end_path_d"]);
 
-          vector<Trajectory> possible_ego_trajectories{};
+          // Update the sensor fusion data
+          // This is a list of all other cars on the same side of the road
+          main_car.UpdateSensorFusion(j[1]["sensor_fusion"]);
 
+          // Get the possible next states
+          vector<State> possible_next_states = main_car.GetSuccessorStates();
+
+          vector<Trajectory> possible_trajectories{};
+
+          // Compute the trajectory of each possible state
           for (int i = 0; i < possible_next_states.size(); i++) {
-            Trajectory trajectory = ego_car.GenerateTrajectory(
+            Trajectory trajectory = main_car.GenerateTrajectory(
                 possible_next_states[i], map_waypoints_s, map_waypoints_x,
                 map_waypoints_y);
+
+            // If it returns a valid trajecotry, then calculate costs and append
+            // this trajectory to the vector of possible trajectories
             if (trajectory.x.size() > 0) {
-              ego_car.CalculateCost(trajectory);
-              possible_ego_trajectories.push_back(trajectory);
+              main_car.CalculateCost(trajectory);
+              possible_trajectories.push_back(trajectory);
             }
           }
-          Trajectory ego_trajectory;
-          // Sort min cost
-          float check_cost = 0;
-          if (possible_ego_trajectories.size() > 0) {
-            std::sort(
-                possible_ego_trajectories.begin(),
-                possible_ego_trajectories.end(),
-                [](Trajectory a, Trajectory b) { return a.cost < b.cost; });
-            ego_trajectory = possible_ego_trajectories[0];
-            ego_car.SetChosenTrajectory(ego_trajectory);
-          }
-          // std::cout << std::endl;
-          ego_car.PrintStatistics(possible_ego_trajectories);
-          // if (check_cost == 0 && possible_ego_trajectories.size() >= 2) {
-          //   std::cout << "###";
-          // }
 
+          Trajectory best_trajectory;
+          float check_cost = 0;
+          if (possible_trajectories.size() > 0) {
+            // Sort possible trajectories by cost
+            std::sort(
+                possible_trajectories.begin(), possible_trajectories.end(),
+                [](Trajectory a, Trajectory b) { return a.cost < b.cost; });
+
+            // Get the trajectory with the lowest cost
+            best_trajectory = possible_trajectories[0];
+
+            // Update main_car post params with the best trajectory
+            main_car.SetChosenTrajectory(best_trajectory);
+          }
+
+          // Print statistics of the final main_car object
+          main_car.PrintStatistics(possible_trajectories,false);
+
+          // Build the JSON msg to be sent to the simulator
           json msgJson;
 
-          msgJson["next_x"] = ego_trajectory.x;
-          msgJson["next_y"] = ego_trajectory.y;
+          msgJson["next_x"] = best_trajectory.x;
+          msgJson["next_y"] = best_trajectory.y;
 
           auto msg = "42[\"control\"," + msgJson.dump() + "]";
 
+          // Send the control msg with the chosen trajectory to the simualtor
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }  // end "telemetry" if
       } else {
