@@ -30,6 +30,7 @@ class Vehicle {
                           nlohmann::basic_json<> previous_path_y,
                           double end_path_s, double end_path_d);
   void UpdateSensorFusion(nlohmann::basic_json<> sensor_fusion);
+  void SetCostWeights(vector<float> weights);
   void SetChosenTrajectory(Trajectory &trajectory);
   vector<State> GetSuccessorStates();
   Trajectory GenerateTrajectory(State state, vector<double> &map_waypoints_s,

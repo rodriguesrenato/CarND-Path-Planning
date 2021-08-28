@@ -62,6 +62,14 @@ void Vehicle::UpdateSensorFusion(nlohmann::basic_json<> sensor_fusion) {
   lane_speed_.clear();
 }
 
+// Set cost weight values
+void Vehicle::SetCostWeights(vector<float> cost_weights) {
+  // Check if the given vector size is equal the number of cost functions
+  if (cost_weights_.size() == 3) {
+    cost_weights_ = cost_weights;
+  }
+}
+
 // Update the main car class private attributes that will be used in next update
 void Vehicle::SetChosenTrajectory(Trajectory &trajectory) {
   target_speed_ = trajectory.target_speed;
@@ -102,14 +110,15 @@ vector<State> Vehicle::GetSuccessorStates() {
       }
       break;
     case State::LCL:
-      // When the vehicle enters in the target_lane, then force a KL state to
-      // only change more one lane before a PLC. Same for LCR
-      if (lane_ != target_lane_) {
+      // When the vehicle enters in the projected_lane, then force a KL state to
+      // avoid directly change more one lane before a PLC procedure. The same
+      // applies for LCR
+      if (lane_ != projected_lane_) {
         states.push_back(State::LCL);
       }
       break;
     case State::LCR:
-      if (lane_ != target_lane_) {
+      if (lane_ != projected_lane_) {
         states.push_back(State::LCR);
       }
       break;
@@ -133,9 +142,8 @@ Trajectory Vehicle::GenerateTrajectory(State state,
                            trajectory_s_projection_, map_waypoints_s,
                            map_waypoints_x, map_waypoints_y);
   } else if (state == State::LCL || state == State::LCR) {
-    // int best_lane = CalculateBestLane(state);
-    int best_lane =
-        lane_ + (state == State::LCR) * 1 + (state == State::LCL) * -1;
+    int best_lane = CalculateBestLane(state);
+
     // Increase s projection on curves to avoid jerk
     return BuildTrajectory(state, best_lane, trajectory_buffer_size_,
                            trajectory_s_projection_ * 1.2, map_waypoints_s,
@@ -360,7 +368,7 @@ Trajectory Vehicle::BuildTrajectory(State state, int target_lane,
   trajectory.final_speed = trajectory_final_speed;
 
   // Vars to calc cost
-  trajectory.target_speed = speed;
+  trajectory.target_speed = CalculateLaneSpeed(trajectory.target_lane);
   trajectory.target_lane = target_lane;
   trajectory.projected_speed = speed;
   trajectory.projected_lane = projected_lane;
@@ -398,7 +406,7 @@ float Vehicle::SpeedCost(Trajectory &trajectory) {
   float cost = 0;
   float stop_cost = 0.8;
 
-  double speed = trajectory.projected_speed;
+  double speed = trajectory.target_speed;
   if (speed > (speed_limit_ + speed_buffer_) || speed < 0) {
     cost = 1;
   } else if (speed < speed_limit_) {
@@ -524,31 +532,25 @@ int Vehicle::CalculateLaneIndex(double d) {
 // Return the best lane according to the state and current lane
 int Vehicle::CalculateBestLane(State state) {
   int best_lane = lane_;
-  double lane_speed = 0.0;  // CalculateLaneSpeed(lane_);
+  double best_lane_speed = 0.0;  // CalculateLaneSpeed(lane_);
 
-  // If it is preparing a lane change, then check all lanes of the lane change
-  // side. If it is a lane change, then check just the next lane according to
-  // the lane change side
-  if (state == State::PLCL) {
+  // If it is a preparing lane change or a lane change, then check all lanes of
+  // the desired side
+  if (state == State::PLCL || state == State::LCL) {
     for (int i = (lane_ - 1); i >= 0; i--) {
       double checked_speed = CalculateLaneSpeed(i);
-      if (checked_speed > lane_speed) {
+      if (checked_speed > best_lane_speed) {
         best_lane = i;
+        best_lane_speed = checked_speed;
       }
     }
-  } else if (state == State::PLCR) {
+  } else if (state == State::PLCR || state == State::LCR) {
     for (int i = (lane_ + 1); i < num_lanes_; i++) {
       double checked_speed = CalculateLaneSpeed(i);
-      if (checked_speed > lane_speed) {
+      if (checked_speed > best_lane_speed) {
         best_lane = i;
+        best_lane_speed = checked_speed;
       }
-    }
-  } else if (state == State::LCL || state == State::LCR) {
-    int check_lane =
-        lane_ + (state == State::LCR) * 1 + (state == State::LCL) * -1;
-    double checked_speed = CalculateLaneSpeed(check_lane);
-    if (checked_speed > lane_speed) {
-      best_lane = check_lane;
     }
   }
 
@@ -657,13 +659,13 @@ void Vehicle::PrintStatistics(vector<Trajectory> t, bool only_state_change) {
   if (state_ != state_prev_ || !only_state_change) {
     vector<string> state_str{"R", "KL", "LCL", "PLCL", "LCR", "PLCR"};
     std::cout << std::fixed << std::setprecision(2) << "State: " << std::setw(4)
-              << state_str[state_prev_] << " -> " << std::setw(4)
-              << state_str[state_] << "  Speed: " << speed_ << " -> "
-              << trajectory_final_speed_ << " | " << projected_speed_ << std::fixed
-              << std::setprecision(0) << "\tLane: " << lane_ << "->"
-              << projected_lane_ << "|" << target_lane_;
+              << state_str[state_prev_] << "->" << std::setw(4)
+              << state_str[state_] << "  Speed: " << speed_ << "->"
+              << trajectory_final_speed_ << "|" << projected_speed_
+              << std::fixed << std::setprecision(0) << "\tLane: " << lane_
+              << "->" << projected_lane_ << "|" << target_lane_;
     std::cout << "   " << std::fixed << std::setprecision(2);
-    std::cout << "LaneSpeeds |";
+    std::cout << "LS |";
     for (int i = 0; i < num_lanes_; i++) {
       std::cout << CalculateLaneSpeed(i) << "|";
     }
@@ -674,7 +676,6 @@ void Vehicle::PrintStatistics(vector<Trajectory> t, bool only_state_change) {
                 << std::setprecision(0) << t[i].projected_lane << ","
                 << t[i].target_lane << "|" << std::fixed
                 << std::setprecision(2);
-      
       for (int j = 0; j < t[i].costs.size(); j++) {
         std::cout << (t[i].costs[j] < 0 ? 0 : t[i].costs[j])
                   << (j < t[i].costs.size() - 1 ? "," : "]");

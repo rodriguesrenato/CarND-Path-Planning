@@ -83,6 +83,7 @@ int main() {
 
   // Instantiate the main car object
   Vehicle main_car = Vehicle(50.0,0.5,3,0.02,4.0,30.0,10.0,2.0,50,5.0,3.0);
+  main_car.SetCostWeights({1.1,1.0,100});
 
   h.onMessage([&main_car, &map_waypoints_x, &map_waypoints_y, &map_waypoints_s,
                &map_waypoints_dx,
