@@ -92,7 +92,7 @@ In this project the goal is to safely navigate around a virtual highway with oth
 
 ## Communication between Path Planner and the Simulator
 
-For this project, Udacity provided a starter c++ code with the websocket communication framework to handle messages received from the simulator (Localization, sensor fusion and previous path data) and sent to it (The next path). Udacity also provided a set of conversion functions between XY and Frenet Coordinates, and the `highway_map.csv` that contains a sparse map list of waypoints around the highway.
+For this project, Udacity provided a starter c++ code with the websocket communication framework to handle messages received from the simulator (Localization, sensor fusion and previous path data) and send back messages to it (The next path). Udacity also provided a set of conversion functions between XY and Frenet Coordinates, and the `highway_map.csv` that contains a sparse map list of waypoints around the highway.
 
 Here is the data received from the Simulator to the C++ Program
 
@@ -131,14 +131,100 @@ The highway's waypoints loop around so the frenet s value, distance along the ro
 
 # Path Planner Stategy 
 
+On each message received from the simulator with new localization / sensor fusion data, the path planner will compute the best path for the car to achieve the goals. These are the main steps done by the path planner:
+
+1. Update the current localization and sensor fusion data
+2. Get a vector of all successor States from the finite state machine.
+3. For each successor State, generate the correspondent Trajectory, calculate the total cost and add it to a vector of possible trajectories.
+4. Get the trajectory with the lowest cost and send it back to the simulator.
+
+## Receive data from Simulator
+
+## Finite State Machine
+
+The diagram below represents the finite state machine (FSM) implemented:
+
+![](images/fsm.png)
+
+As it isn't allowed counterflow and off road driving, the FSM automatically skips the states that would results in these conditions by testing the current lane.
+
+## Trajectory Generation
+
+- 
+
+## Trajectory Cost Calculation
+
+There were implemented 3 cost functions:
+
+- Speed Cost
+- Lane Change Cost (Inefficiency Cost)
+- Collision Cost
+
+### Speed Cost
+
+### Lane Change Cost
+
+### Colision
+
+
+
+## Select Best Trajectory
+
+## Send the best Trajectory to Simulator
+
+
 # C++ Classes Structue
 
-## Vehicle Class
 
-## Trajectory Class
 
 ## States
 
+The possible states of the finite state machine were defined as the `State` enum in the file `states.h`
+
+There are 6 defined states:
+- `R`: Ready
+- `KL`: Keep Lane
+- `PLCL`: Prepare Lane Change Left
+- `LCL`: Lane Change Left
+- `PLCR`: Prepare Lane Change Right
+- `LCR`: Lane Change Right
+
+## Trajectory Class
+
+The Trajectory class is a simple class of public attributes that keeps all relevant informations of the path. These attributes are mainly used to calculate the trajectory costs in the `Vehicle` cost functions, to update the Vehicle class later with the selected trajectory and to store the X and Y points that will be sent back to the simulator.
+
+## Vehicle Class
+
+The Vehicle class is the main class responsible for unifying informations of the vehicle, sensor fusion, the road and states. The speeds given in mph are converted to meters per second before get assigned to class attributes or used by methods. 
+
+These are the implemented methods:
+
+Vehicle constructor
+UpdateLocalizationData
+UpdatePreviousPath
+UpdateSensorFusion
+SetCostWeights
+SetChosenTrajectory
+GetSuccessorStates
+GenerateTrajectory
+BuildTrajectory
+CalculateCost
+SpeedCost
+LaneChangeCost
+CollisionCost
+CheckCollision
+PredictSensorFusion
+CalculateLaneIndex
+CalculateBestLane
+CalculateLaneSpeed
+LanesToCheckSpeed
+GetVehicleAhead
+GetVehicleBehind
+PrintStatistics
+
+## Helper Functions
+
+The `helpers.h` file contains conversion functions between XY and Frenet coordinates. This header file is used by the `Vehicle` class.
 
 # Next Features to be Implemented
 
