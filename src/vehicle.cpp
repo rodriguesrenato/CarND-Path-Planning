@@ -172,7 +172,7 @@ Trajectory Vehicle::BuildTrajectory(State state, int target_lane,
   // position
   vector<int> lanes = LanesToCheckSpeed(d_);
 
-  // Add the target lane in case it isn't in the lanes vector TODO:CHECK
+  // Add the intended lane in case it isn't in the lanes vector TODO:CHECK
   int intended_lane = lane_ + (state == State::PLCR) * 1 +
                       (state == State::PLCL) * -1 + (state == State::LCR) * 1 +
                       (state == State::LCL) * -1;
@@ -479,7 +479,7 @@ bool Vehicle::CheckCollision(double init_s, double final_s, int init_lane,
         collision = true;
       }
 
-      // 4. Check the case where there is a vehicle at the middle of
+      // 5. Check the case where there is a vehicle at the middle of
       // the trajectory
       if (predictions[i][1] > threshold_upper_init_s &&
           predictions[i][2] < threshold_lower_final_s) {
